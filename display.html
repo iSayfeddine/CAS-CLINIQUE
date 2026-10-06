@@ -1,210 +1,56 @@
-```html
-<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Projecteur — THYROID // CASE 001</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
-</head>
-
-<body class="dark">
-  <div id="app"></div>
-
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Projecteur — THYROID // CASE 001</title><link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="config.js"></script><script src="app.js"></script></head>
+<body class="dark"><div id="app"></div>
 <script>
 const code = (new URLSearchParams(location.search).get('session') || '').toUpperCase();
 let S = null, last = '';
-
 async function load() {
-  try {
-    S = await rpc('get_state', { p_code: code });
-    sync(S);
-    render();
-  }
-  catch (e) {
-    $('#app').innerHTML = `<div class="disp"><main><h1>${esc(msg(e))}</h1></main></div>`;
-  }
+  try { S = await rpc('get_state', { p_code: code }); sync(S); render(); }
+  catch (e) { $('#app').innerHTML = `<div class="disp"><main><h1>${esc(msg(e))}</h1></main></div>`; }
 }
+if (!code) $('#app').innerHTML = `<div class="disp"><main><h1>Code de session manquant</h1><p>Ouvrez cet écran depuis le panneau présentateur.</p></main></div>`;
+else { room(code, { onTick: load }); setInterval(() => { const t = $('#tm'); if (t && S) { const n = secsLeft(S); t.textContent = n; if (n === 0 && S.qstate === 'OPEN') load(); } }, 500); }
 
-if (!code)
-  $('#app').innerHTML = `<div class="disp"><main><h1>Code de session manquant</h1><p>Ouvrez cet écran depuis le panneau présentateur.</p></main></div>`;
-else {
-  room(code, { onTick: load });
-  setInterval(() => {
-    const t = $('#tm');
-    if (t && S) {
-      const n = secsLeft(S);
-      t.textContent = n;
-      if (n === 0 && S.qstate === 'OPEN') load();
-    }
-  }, 500);
-}
-
-const qrBlock = s =>
-  `<div class="qr">${qrSvg(joinUrl(s.code))}</div>
-   <div class="code">${s.code}</div>
-   <p class="muted">${esc(joinUrl(s.code).replace(/^https?:\/\//, '').split('?')[0])}</p>`;
-
+const qrBlock = s => `<div class="qr">${qrSvg(joinUrl(s.code))}</div><div class="code">${s.code}</div><p class="muted">${esc(joinUrl(s.code).replace(/^https?:\/\//, '').split('?')[0])}</p>`;
 function render() {
-  const s = S, m = s.case.meta || {}, q = s.question;
-  let b = '';
-
-  if (s.show_leaderboard && s.phase !== 'final')
-    b = `<h1>CLINICAL LEADERBOARD</h1>${lbHTML(s.leaderboard)}`;
-
-  else if (s.phase === 'lobby')
-    b = `
-      <h1>${esc(s.case.title)}</h1>
-      <h2>REJOIGNEZ L'ÉQUIPE MÉDICALE</h2>
-      <p class="muted">Think. Decide. Reveal.</p>
-
-      ${qrBlock(s)}
-
-      <div class="project-credits">
-        <div class="credits-title">Projet réalisé par</div>
-
-        <div class="credits-grid">
-          <div>Sayf Eddine El Bakrioui</div>
-          <div>Mohammed El Ghammat Touwani</div>
-          <div>Jannat El Farah</div>
-
-          <div>Rafik El Hassyouti</div>
-          <div>Yassine EL GHEUR</div>
-          <div>Aya El Bahhari</div>
-        </div>
-      </div>
-
-      <h2>Participants connectés : <b>${s.participants}</b></h2>
-
-      <div class="chips">
-        ${(s.names || []).map(n => `<span>${esc(n)}</span>`).join('')}
-      </div>`;
-
-  else if (s.phase === 'interrogation')
-    b = `<h1>CONSULTATION ROOM</h1><h2>${esc(m.patient)} · ${esc(m.age)}</h2><p>« ${esc(m.motif)} »</p>
-      <div class="grid">${s.interrogation.map(c => `<div class="cardx ${c.unlocked ? 'on' : ''}">${c.unlocked ? '✓' : '🔒'} <b>${esc(c.title)}</b>${c.unlocked ? `<small>${esc(c.reveal)}</small>` : ''}</div>`).join('')}</div>`;
-
-  else if (s.phase === 'exam')
-    b = `<h1>EXAMEN CLINIQUE</h1>${s.exam.map(l => `<h2>✓ ${esc(l)}</h2>`).join('')}`;
-
-  else if (s.phase === 'join')
-    b = `<h1>YOUR TURN</h1><h2>Vous avez interrogé la patiente.<br>Vous avez réalisé l'examen clinique.<br>Maintenant, vous prenez en charge ce nodule.</h2>
-      <div class="row3"><div><h2>SCAN TO JOIN</h2>${qrBlock(s)}</div><div><h2 style="margin-top:2em">Connectés : <b>${s.participants}</b></h2></div></div>`;
-
-  else if (s.phase === 'between')
-    b = `<h1>NEXT CLINICAL DECISION</h1><h2>Décisions : ${s.q_index} / ${s.total} terminées</h2>`;
-
+  const s = S, m = s.case.meta || {}, q = s.question; let b = '';
+  if (s.show_leaderboard && s.phase !== 'final') b = `<h1>CLINICAL LEADERBOARD</h1>${lbHTML(s.leaderboard)}`;
+  else if (s.phase === 'lobby') b = `<h1>${esc(s.case.title)}</h1><h2>REJOIGNEZ L'ÉQUIPE MÉDICALE</h2><p class="muted">Think. Decide. Reveal.</p>${qrBlock(s)}
+    <h2>Participants connectés : <b>${s.participants}</b></h2><div class="chips">${(s.names || []).map(n => `<span>${esc(n)}</span>`).join('')}</div>`;
+  else if (s.phase === 'interrogation') b = `<h1>CONSULTATION ROOM</h1><h2>${esc(m.patient)} · ${esc(m.age)}</h2><p>« ${esc(m.motif)} »</p>
+    <div class="grid">${s.interrogation.map(c => `<div class="cardx ${c.unlocked ? 'on' : ''}">${c.unlocked ? '✓' : '🔒'} <b>${esc(c.title)}</b>${c.unlocked ? `<small>${esc(c.reveal)}</small>` : ''}</div>`).join('')}</div>`;
+  else if (s.phase === 'exam') b = `<h1>EXAMEN CLINIQUE</h1>${s.exam.map(l => `<h2>✓ ${esc(l)}</h2>`).join('')}`;
+  else if (s.phase === 'join') b = `<h1>YOUR TURN</h1><h2>Vous avez interrogé la patiente.<br>Vous avez réalisé l'examen clinique.<br>Maintenant, vous prenez en charge ce nodule.</h2>
+    <div class="row3"><div><h2>SCAN TO JOIN</h2>${qrBlock(s)}</div><div><h2 style="margin-top:2em">Connectés : <b>${s.participants}</b></h2></div></div>`;
+  else if (s.phase === 'between') b = `<h1>NEXT CLINICAL DECISION</h1><h2>Décisions : ${s.q_index} / ${s.total} terminées</h2>`;
   else if (s.phase === 'question') {
-    const dist = ['DIST', 'REVEALED', 'EXPLAINED'].includes(s.qstate),
-          rev = ['REVEALED', 'EXPLAINED'].includes(s.qstate);
-
-    b = `<div style="display:flex;justify-content:space-between">
-        <span class="muted">DÉCISION ${s.q_index} / ${s.total}</span>
-        ${s.qstate === 'OPEN'
-          ? `<span class="tm" id="tm">${secsLeft(s)}</span>`
-          : `<span class="muted">${s.qstate === 'LOCKED' ? 'RÉPONSES VERROUILLÉES' : ''}</span>`}
-      </div>
-
-      ${q.context
-        ? `<div class="ctx"><b>${esc(q.context.title)}</b>${q.context.lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>`
-        : ''}
-
+    const dist = ['DIST', 'REVEALED', 'EXPLAINED'].includes(s.qstate), rev = ['REVEALED', 'EXPLAINED'].includes(s.qstate);
+    b = `<div style="display:flex;justify-content:space-between"><span class="muted">DÉCISION ${s.q_index} / ${s.total}</span>
+      ${s.qstate === 'OPEN' ? `<span class="tm" id="tm">${secsLeft(s)}</span>` : `<span class="muted">${s.qstate === 'LOCKED' ? 'RÉPONSES VERROUILLÉES' : ''}</span>`}</div>
+      ${q.context ? `<div class="ctx"><b>${esc(q.context.title)}</b>${q.context.lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>` : ''}
       <div class="qt">${esc(q.text)}</div>`;
-
-    if (s.qstate === 'OPEN')
-      b += q.options.map(o => `<div class="opt"><b>${o.key}</b><span>${esc(o.text)}</span></div>`).join('') +
-           `<h2>${s.answered} / ${s.participants} ont répondu</h2>`;
-
-    else if (!dist)
-      b += q.options.map(o => `<div class="opt"><b>${o.key}</b><span>${esc(o.text)}</span></div>`).join('');
-
-    else
-      b += `<h2>THE ROOM HAS DECIDED</h2>${distHTML(s, true)}`;
-
-    if (rev && q.result)
-      b += `<div class="res"><b>${esc(q.result.title)}</b>${q.result.lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
-
-    if (rev && q.acr)
-      b += acrHTML(q.acr);
-
-    if (s.qstate === 'EXPLAINED')
-      b += `<div class="pearl"><div>${esc(q.explanation)}</div><b>${esc(q.pearl)}</b></div>`;
+    if (s.qstate === 'OPEN') b += q.options.map(o => `<div class="opt"><b>${o.key}</b><span>${esc(o.text)}</span></div>`).join('') + `<h2>${s.answered} / ${s.participants} ont répondu</h2>`;
+    else if (!dist) b += q.options.map(o => `<div class="opt"><b>${o.key}</b><span>${esc(o.text)}</span></div>`).join('');
+    else b += `<h2>THE ROOM HAS DECIDED</h2>${distHTML(s, true)}`;
+    if (rev && q.result) b += `<div class="res"><b>${esc(q.result.title)}</b>${q.result.lines.map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
+    if (rev && q.acr) b += acrHTML(q.acr);
+    if (s.qstate === 'EXPLAINED') b += `<div class="pearl"><div>${esc(q.explanation)}</div><b>${esc(q.pearl)}</b></div>`;
+  } else if (s.phase === 'final') {
+    const f = s.final, st = f.stats, hard = [...st].filter(x => x.answered).sort((a, b) => a.pct - b.pct)[0], easy = [...st].filter(x => x.answered).sort((a, b) => b.pct - a.pct)[0];
+    const lb = s.leaderboard.slice(0, 3), avgAcc = s.max_points ? Math.round(100 * f.avg_score / s.max_points) : 0;
+    b = `<h1>CASE CLOSED</h1><div class="row3"><div><h2>FINAL CLINICAL PATHWAY</h2><p>${m.pathway.map(esc).join('<br>↓<br>')}</p>
+      <div class="pearl"><b>CLINICAL PEARL</b><div>${esc(m.pearl)}</div></div></div>
+      <div><h2>TOP CLINICIANS</h2>${lbHTML(lb)}<h2>ROOM PERFORMANCE</h2><p>Participants : ${s.participants} · Réponses : ${f.responses}<br>Score moyen : ${f.avg_score} / ${s.max_points} (${avgAcc}%)</p>
+      ${st.map(x => `<div class="bar" style="grid-template-columns:9em 1fr 3em"><span>${esc(x.label)}</span><div class="track"><i data-w="${x.pct}"></i></div><em>${x.pct}%</em></div>`).join('')}
+      ${hard ? `<p>Décision la plus difficile : <b>${esc(hard.label)}</b> · Meilleure réussite : <b>${esc(easy.label)}</b></p>` : ''}</div></div>
+      <p class="muted" style="font-size:.6em">${esc(m.frameworks)}<br>${esc(m.disclaimer)}</p>`;
   }
-
-  else if (s.phase === 'final') {
-    const f = s.final,
-          st = f.stats,
-          hard = [...st].filter(x => x.answered).sort((a, b) => a.pct - b.pct)[0],
-          easy = [...st].filter(x => x.answered).sort((a, b) => b.pct - a.pct)[0];
-
-    const lb = s.leaderboard.slice(0, 3),
-          avgAcc = s.max_points ? Math.round(100 * f.avg_score / s.max_points) : 0;
-
-    b = `<h1>CASE CLOSED</h1>
-      <div class="row3">
-        <div>
-          <h2>FINAL CLINICAL PATHWAY</h2>
-          <p>${m.pathway.map(esc).join('<br>↓<br>')}</p>
-
-          <div class="pearl">
-            <b>CLINICAL PEARL</b>
-            <div>${esc(m.pearl)}</div>
-          </div>
-        </div>
-
-        <div>
-          <h2>TOP CLINICIANS</h2>
-          ${lbHTML(lb)}
-
-          <h2>ROOM PERFORMANCE</h2>
-          <p>
-            Participants : ${s.participants} · Réponses : ${f.responses}<br>
-            Score moyen : ${f.avg_score} / ${s.max_points} (${avgAcc}%)
-          </p>
-
-          ${st.map(x => `<div class="bar" style="grid-template-columns:9em 1fr 3em">
-            <span>${esc(x.label)}</span>
-            <div class="track"><i data-w="${x.pct}"></i></div>
-            <em>${x.pct}%</em>
-          </div>`).join('')}
-
-          ${hard
-            ? `<p>Décision la plus difficile : <b>${esc(hard.label)}</b> · Meilleure réussite : <b>${esc(easy.label)}</b></p>`
-            : ''}
-        </div>
-      </div>
-
-      <p class="muted" style="font-size:.6em">
-        ${esc(m.frameworks)}<br>${esc(m.disclaimer)}
-      </p>`;
-  }
-
-  $('#app').innerHTML = `
-    <div class="disp">
-      <header>
-        <span>${esc(s.case.title)}</span>
-        <span>LIVE CLINICAL SIMULATION</span>
-        <span>${esc(m.patient)} · ${esc(m.age)}</span>
-      </header>
-
-      <main>${b}</main>
-
-      <footer>
-        <span>${s.participants} participants connectés</span>
-        ${fileHTML(s)}
-        <span>${s.status === 'paused' ? '⏸ PAUSE' : ''}</span>
-      </footer>
-    </div>`;
-
+  $('#app').innerHTML = `<div class="disp"><header><span>${esc(s.case.title)}</span><span>LIVE CLINICAL SIMULATION</span><span>${esc(m.patient)} · ${esc(m.age)}</span></header>
+    <main>${b}</main><footer><span>${s.participants} participants connectés</span>${fileHTML(s)}<span>${s.status === 'paused' ? '⏸ PAUSE' : ''}</span></footer></div>`;
   animate();
 }
-
 if (code) load();
-</script>
-</body>
-</html>
-```
+</script></body></html>
