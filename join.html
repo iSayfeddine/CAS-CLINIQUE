@@ -1,0 +1,87 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rejoindre — THYROID // CASE 001</title><link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="config.js"></script><script src="app.js"></script></head>
+<body><div id="app"></div>
+<script>
+const qp = new URLSearchParams(location.search);
+let code = (qp.get('session') || localStorage.getItem('tc_last') || '').toUpperCase();
+let ident = null, S = null, ME = null, sel = null, lastQ = null, online = false, started = false;
+const idKey = () => 'tc_p_' + code;
+
+function form(m) {
+  $('#app').innerHTML = `<div class="ph"><h1>THYROID // CASE 001</h1><h3>REJOINDRE LA SESSION</h3>
+  <label>Code</label><input id="c" maxlength="6" autocapitalize="characters" value="${esc(code)}">
+  <label>Nom</label><input id="n" maxlength="24" placeholder="Votre nom"><p class="err">${esc(m || '')}</p>
+  <button class="pri" id="go" style="width:100%;padding:18px">REJOINDRE</button></div>`;
+  $('#go').onclick = async () => {
+    code = $('#c').value.trim().toUpperCase();
+    try {
+      const r = await rpc('join_session', { p_code: code, p_name: $('#n').value });
+      localStorage.setItem(idKey(), JSON.stringify(r)); localStorage.setItem('tc_last', code);
+      ident = r; start();
+    } catch (e) { form(msg(e)); $('#n').value = $('#n').value; }
+  };
+}
+function start() {
+  if (started) return; started = true; refresh();
+  room(code, { onTick: refresh, onStatus: st => { online = st === 'SUBSCRIBED'; if (S) render(); }, track: true, key: ident.id });
+  setInterval(() => {
+    if (!S || S.phase !== 'question' || S.qstate !== 'OPEN') return;
+    const t = $('#tm'); if (!t) return; const n = secsLeft(S); t.textContent = n + ' s';
+    if (n === 0) render();
+  }, 500);
+}
+async function refresh() {
+  try {
+    const r = await rpc('get_participant_state', { p_code: code, p_pid: ident.id, p_token: ident.token });
+    S = r.state; ME = r.me; sync(S);
+    if (S.phase === 'question' && S.question.id !== lastQ) { lastQ = S.question.id; sel = null; }
+    render();
+  } catch (e) {
+    if (!['session_not_found', 'participant_not_found'].includes(e.message)) { $('#app').innerHTML = `<div class="ph"><h2>Erreur de connexion</h2><p class="err">${esc(e.message)}</p><button onclick="location.reload()">Réessayer</button></div>`; return; }
+    { localStorage.removeItem(idKey()); started = false; $('#app').innerHTML = `<div class="ph"><h2>${esc(msg(e))}</h2></div>`; }
+  }
+}
+function render() {
+  const s = S, m = ME, q = s.question;
+  let h = `<div class="ph"><div class="top"><b>THYROID // CASE 001</b><span class="${online ? 'ok' : 'bad'}">${online ? '● CONNECTÉ' : 'Connexion interrompue — reconnexion...'}</span></div>
+  <div class="sc"><span>Score <b>${m.score}</b></span>${s.phase === 'question' ? `<span>Question ${s.q_index} / ${s.total}</span>` : ''}</div>`;
+  if (s.status === 'paused') h += `<div class="card"><b>⏸ Session en pause</b></div>`;
+  if (s.phase === 'lobby') h += `<div class="card"><h3>Connecté</h3><p>En attente du début de la session…</p></div>`;
+  else if (['interrogation', 'exam'].includes(s.phase)) h += `<div class="card"><h3>Consultation en cours</h3><p>Suivez l'écran : l'interrogatoire et l'examen clinique se déroulent à voix haute.</p></div>`;
+  else if (['join', 'between'].includes(s.phase)) h += `<div class="card"><h3>Prochaine décision</h3><p>Préparez-vous…</p></div>`;
+  else if (s.phase === 'question') {
+    const a = m.answer, rev = ['REVEALED', 'EXPLAINED'].includes(s.qstate), open = s.qstate === 'OPEN' && s.status === 'active' && secsLeft(s) > 0;
+    h += `<div class="card">${q.context ? `<small class="muted">${esc(q.context.title)}</small>${q.context.lines.map(l => `<div>${esc(l)}</div>`).join('')}` : ''}</div>
+    <h3>${esc(q.text)}</h3>${open ? `<p>⏱ <b id="tm">${secsLeft(s)} s</b></p>` : ''}`;
+    if (a) {
+      h += `<div class="card"><div class="big">✓ RÉPONSE ENREGISTRÉE</div><p style="text-align:center">Votre réponse : <b>${a.key}</b></p></div>`;
+      if (rev) h += a.is_correct ? `<div class="big ok">✓ BONNE RÉPONSE<br>+${a.points} POINTS</div>` : `<div class="big bad">RÉPONSE INCORRECTE<br>+0 POINT</div><p style="text-align:center">Bonne réponse : <b>${q.correct}</b></p>`;
+      else h += `<p class="muted" style="text-align:center">En attente de la révélation…</p>`;
+    } else if (open) {
+      h += q.options.map(o => `<button class="opt ${sel === o.key ? 'sel' : ''}" data-k="${o.key}"><b>${o.key}</b><span>${esc(o.text)}</span></button>`).join('')
+        + `<button class="pri valid" id="val" ${sel ? '' : 'disabled'}>VALIDER</button><p class="err" id="er"></p>`;
+    } else {
+      h += `<div class="card">${rev ? `Bonne réponse : <b>${q.correct}</b> (vous n'avez pas répondu)` : 'Les réponses sont actuellement verrouillées.'}</div>`;
+    }
+    if (q.pearl) h += `<div class="card"><small class="muted">Le point clé</small><div>${esc(q.pearl)}</div></div>`;
+  } else if (s.phase === 'final') {
+    const acc = s.total ? Math.round(1000 * m.correct / s.total) / 10 : 0;
+    h += `<div class="card"><h2>${s.status === 'finished' ? 'SESSION TERMINÉE' : ''}</h2><h1>CASE COMPLETE</h1><div class="big">${m.score} / ${s.max_points}</div>
+    <p>Précision : <b>${acc}%</b></p><p>Correct : <b>${m.correct} / ${s.total}</b></p><p>Rang : <b style="font-size:2rem">${m.rank}</b></p>
+    <p class="muted">${acc >= 75 ? 'Excellent raisonnement clinique' : acc >= 50 ? 'Bon raisonnement clinique' : 'Raisonnement à consolider — revoyez la démarche pas à pas'}</p></div>`;
+  }
+  if (s.show_leaderboard && s.phase !== 'final') h += `<div class="card"><h3>CLASSEMENT</h3>${lbHTML((s.leaderboard || []).slice(0, 5))}</div>`;
+  $('#app').innerHTML = h + '</div>';
+  document.querySelectorAll('.opt').forEach(b => b.onclick = () => { sel = b.dataset.k; render(); });
+  const v = $('#val'); if (v) v.onclick = async () => {
+    v.disabled = true;
+    try { await rpc('submit_answer', { p_code: code, p_pid: ident.id, p_token: ident.token, p_qid: S.question.id, p_option: sel }); refresh(); }
+    catch (e) { const er = $('#er'); if (er) er.textContent = msg(e); if (e.message === 'already_answered') refresh(); else v.disabled = false; }
+  };
+}
+(function init() {
+  try { ident = JSON.parse(localStorage.getItem(idKey()) || 'null'); } catch { ident = null; }
+  if (code && ident) start(); else form();
+})();
+</script></body></html>

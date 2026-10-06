@@ -1,0 +1,106 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contrôle présentateur — THYROID // CASE 001</title><link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="config.js"></script><script src="app.js"></script></head>
+<body><div id="app"></div><div class="toast" id="toast"></div>
+<script>
+let cred = null, S = null, online = 0, secs = 45, started = false;
+try { cred = JSON.parse(localStorage.getItem('tc_presenter') || 'null'); } catch {}
+const toast = t => { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; setTimeout(() => e.style.display = 'none', 3500); };
+
+function login(m) {
+  $('#app').innerHTML = `<div class="ctl" style="max-width:480px"><h1>PRÉSENTATEUR</h1><h3>THYROID // CASE 001</h3>
+  <label>Mot de passe présentateur</label><input id="pw" type="password"><input id="slug" value="thyroid-case-001" type="hidden">
+  <p class="err">${esc(m || '')}</p><button class="pri" id="mk" style="width:100%">CREATE SESSION</button></div>`;
+  $('#mk').onclick = async () => {
+    try { cred = await rpc('create_session', { p_pass: $('#pw').value, p_slug: $('#slug').value });
+      localStorage.setItem('tc_presenter', JSON.stringify(cred)); begin(); } catch (e) { login(msg(e)); }
+  };
+}
+function begin() {
+  if (started) return; started = true; refresh();
+  room(cred.code, { onTick: refresh, onPresence: n => { online = n; if (S) render(); } });
+  setInterval(() => { const t = $('#tm'); if (t && S) t.textContent = secsLeft(S) + ' s'; }, 500);
+}
+async function refresh() {
+  try { S = await rpc('get_presenter_state', { p_code: cred.code, p_token: cred.token }); sync(S); render(); }
+  catch (e) {
+    if (['unauthorized', 'session_not_found'].includes(e.message)) { localStorage.removeItem('tc_presenter'); started = false; cred = null; login(msg(e)); }
+    else $('#app').innerHTML = `<div class="ctl"><h2>Erreur de connexion</h2><p class="err">${esc(e.message)}</p><p>Vérifiez config.js (URL + clé publishable) et que le SQL a été exécuté.</p><button onclick="location.reload()">Réessayer</button></div>`;
+  }
+}
+async function cmd(c, arg) {
+  const warn = { end: 'Terminer la session ?', reset: 'Réinitialiser cette session ? Tous les participants et scores seront supprimés (le cas n\'est pas supprimé).' };
+  if (warn[c] && !confirm(warn[c])) return;
+  try { S = await rpc('presenter_cmd', { p_code: cred.code, p_token: cred.token, p_cmd: c, p_arg: arg ?? null }); sync(S); render(); }
+  catch (e) { toast(msg(e)); }
+}
+function allowed(s) {
+  if (s.status === 'finished') return new Set(['reset']);
+  if (s.status === 'paused') return new Set(['resume', 'end', 'reset']);
+  const a = new Set(['pause', 'end', 'reset', 'leaderboard']), p = s.phase, q = s.qstate;
+  if (p === 'lobby') a.add('start');
+  if (p === 'interrogation') { a.add('unlock'); a.add('exam'); }
+  if (p === 'exam') a.add('yourturn');
+  if (p === 'join' || p === 'between') a.add('open');
+  if (p === 'question') {
+    if (q === 'OPEN') { a.add('lock'); a.add('dist'); } if (q === 'LOCKED') a.add('dist');
+    if (q === 'LOCKED' || q === 'DIST') a.add('reveal'); if (q === 'REVEALED') a.add('explain');
+    if (q === 'REVEALED' || q === 'EXPLAINED') a.add('next');
+  }
+  return a;
+}
+function primary(s) {
+  if (s.status !== 'active') return s.status === 'paused' ? 'resume' : '';
+  const p = s.phase, q = s.qstate;
+  if (p === 'question') return { OPEN: 'lock', LOCKED: 'dist', DIST: 'reveal', REVEALED: 'explain', EXPLAINED: 'next' }[q] || '';
+  return { lobby: 'start', interrogation: 'exam', exam: 'yourturn', join: 'open', between: 'open' }[p] || '';
+}
+function render() {
+  const s = S, pr = s.private, A = allowed(s), P = primary(s), q = s.question;
+  const B = (c, label, cls = '') => `<button data-c="${c}" class="${cls} ${P === c ? 'main' : ''}" ${A.has(c) ? '' : 'disabled'}>${label}</button>`;
+  const notes = pr.notes || {};
+  const pending = Math.max(0, s.participants - s.answered);
+  const cards = (s.phase === 'interrogation' && pr.cards) ? pr.cards.map((c, i) => `<div class="note"><button data-c="unlock" data-a="${i}" ${s.interrogation[i].unlocked ? 'disabled' : ''} class="ghost">${s.interrogation[i].unlocked ? '✓' : '🔒'} ${esc(c.title)}</button>
+     <div class="muted">Demander : ${c.asks.map(esc).join(' · ')}</div><div>Réponse : ${esc(c.reveal)}</div></div>`).join('') : '';
+  const d = s.distribution || {}, pc = pcts(d), keys = Object.keys(d).sort();
+  $('#app').innerHTML = `<div class="ctl">
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><h2>THYROID // CASE 001 — Session <b>${s.code}</b></h2>
+    <div class="btns"><a href="display.html?session=${s.code}" target="_blank"><button class="ghost">Ouvrir l'écran projecteur</button></a>
+    <button class="ghost" data-c="__new">Nouvelle session</button></div></div>
+  <div class="panel stat"><span>Phase : ${s.phase}</span><span>Question : ${s.q_index}/${s.total} ${s.phase === 'question' ? '(' + s.qstate + ')' : ''}</span><span>Statut : ${s.status}</span>
+    <span>Inscrits : ${s.participants}</span><span>En ligne : ${online}</span>
+    ${s.phase === 'question' ? `<span>Répondu : ${s.answered} / ${s.participants}</span><span>En attente : ${pending}</span>` : ''}
+    ${s.qstate === 'OPEN' ? `<span>⏱ <b id="tm">${secsLeft(s)} s</b></span>` : ''}</div>
+  <div class="panel"><div class="btns">
+    ${B('start', 'START CASE')}${B('exam', 'EXAMEN CLINIQUE')}${B('yourturn', 'YOUR TURN / QR')}
+    <select id="secs" style="width:auto;margin:0">${[30, 45, 60].map(v => `<option ${v === secs ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    ${B('open', 'OPEN QUESTION')}${B('lock', 'LOCK')}${B('dist', 'SHOW DISTRIBUTION')}${B('reveal', 'REVEAL ANSWER + POINTS')}${B('explain', 'SHOW EXPLANATION')}
+    ${B('leaderboard', 'SHOW LEADERBOARD')}${B('next', s.q_index >= s.total ? 'TERMINER LE CAS' : 'NEXT')}
+    ${s.status === 'paused' ? B('resume', 'RESUME') : B('pause', 'PAUSE')}${B('end', 'END SESSION', 'danger')}${B('reset', 'RESET', 'danger')}</div>
+    <p class="muted">Raccourci : Entrée = action recommandée (contour bleu). Le chrono expiré verrouille seulement ; la révélation reste manuelle.</p></div>
+  <div class="cols"><div>
+    <div class="panel"><h3>Notes présentateur (privé)</h3>
+      ${pr.script ? `<div class="note">${esc(pr.script)}</div>` : ''}
+      ${notes.intro ? `<div class="note"><b>Intro :</b> ${esc(notes.intro)}</div><div class="note"><b>Discussion :</b> ${esc(notes.discussion)}</div>
+        <div class="note"><b>Révélation :</b> ${esc(notes.reveal)}</div><div class="note"><b>Transition :</b> ${esc(notes.transition)}</div>
+        <div class="note"><b>Explication :</b> ${esc(pr.explanation)}</div><div class="note"><b>Point clé :</b> ${esc(pr.pearl)}</div>` : ''}
+      ${cards}</div></div>
+  <div><div class="panel"><h3>${q ? esc(q.text) : 'Réponses en direct'}</h3>
+    ${q ? keys.map(k => `<div class="bar ${pr.correct === k ? 'ok' : ''}"><b>${k}</b><span>${esc(q.options.find(o => o.key === k).text)}${pr.correct === k ? ' ✔ (clé)' : ''}</span>
+      <div class="track"><i style="width:${pc[k]}%"></i></div><em>${d[k]} · ${pc[k]}%</em></div>`).join('') : '<p class="muted">Aucune question ouverte.</p>'}</div>
+    <div class="panel"><h3>Classement (top 10, privé)</h3>${lbHTML(s.leaderboard)}</div></div></div></div>`;
+  const sel = $('#secs'); if (sel) sel.onchange = () => secs = +sel.value;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('button[data-c]'); if (!b || b.disabled) return;
+  if (b.dataset.c === '__new') { if (confirm('Créer une nouvelle session ? (l\'ancienne reste enregistrée)')) { localStorage.removeItem('tc_presenter'); location.reload(); } return; }
+  cmd(b.dataset.c, b.dataset.a !== undefined ? +b.dataset.a : b.dataset.c === 'open' ? secs : null);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !S || ['INPUT', 'SELECT', 'BUTTON'].includes(document.activeElement.tagName)) return;
+  const p = primary(S); if (p && allowed(S).has(p)) cmd(p, p === 'open' ? secs : null);
+});
+if (cred) { begin(); } else login();
+</script></body></html>
